@@ -18,10 +18,15 @@ from baselines.common.vec_env.dummy_vec_env import DummyVecEnv
 from baselines.common.vec_env.subproc_vec_env import SubprocVecEnv
 from baselines.common import atari_wrappers, retro_wrappers
 
+sys.path.append("/home/jupyter/Notebooks/Chang/HardRLWithYoutube/nnrunner/a2c_gvgai")
+import nnrunner.a2c_gvgai.level_selector as ls
+
 try:
     from mpi4py import MPI
 except ImportError:
     MPI = None
+
+store = None
 
 _game_envs = defaultdict(set)
 for env in gym.envs.registry.all():
@@ -45,6 +50,7 @@ _game_envs['retro'] = set([
 
 
 def train(args, extra_args):
+    global store
     env_type, env_id = get_env_type(args.env)
         
     total_timesteps = int(args.num_timesteps)
@@ -54,7 +60,11 @@ def train(args, extra_args):
     alg_kwargs = get_learn_function_defaults(args.alg, env_type)
     alg_kwargs.update(extra_args)
 
-    env = build_env(args)
+    lvlFileName = "/home/jupyter/Notebooks/Chang/HardRLWithYoutube/nnrunner/a2c_gvgai/examples/gridphysics/zelda_lvl0.txt"
+    selector = ls.LevelSelector.get_selector("map-elite", os.path.basename(lvlFileName),os.path.dirname(os.path.abspath(lvlFileName)), max=1)
+    env = build_env(args, selector)
+    env.reset()
+    # store.reset()
 
     if args.network:
         alg_kwargs['network'] = args.network
@@ -63,7 +73,8 @@ def train(args, extra_args):
             alg_kwargs['network'] = get_default_network(env_type)
  
        
-    
+    env.reset()
+    print(type(env))
     print('Training {} on {}:{} with arguments \n{}'.format(args.alg, env_type, env_id, alg_kwargs))
     model = learn(
         env=env,  
@@ -75,7 +86,8 @@ def train(args, extra_args):
     return model, env
 
 
-def build_env(args):
+def build_env(args, selector=None):
+    global store
     ncpu = multiprocessing.cpu_count()
     if sys.platform == 'darwin': ncpu //= 2
     nenv = args.num_env or ncpu
@@ -84,6 +96,7 @@ def build_env(args):
     seed = args.seed    
 
     env_type, env_id = get_env_type(args.env)
+    print(env_type, env_id, nenv, args.num_env)
     if env_type == 'mujoco':
         get_session(tf.ConfigProto(allow_soft_placement=True,
                                    intra_op_parallelism_threads=1, 
@@ -111,6 +124,14 @@ def build_env(args):
             env = atari_wrappers.wrap_deepmind(env)
             # TODO check if the second seeding is necessary, and eventually remove
             env.seed(seed)
+        elif "Zelda" in env_id:
+            sys.path.append("/home/jupyter/Notebooks/Chang/HardRLWithYoutube/nnrunner/a2c_gvgai")
+            import nnrunner.a2c_gvgai.env as gvgai_env
+            frame_stack_size = 4
+            print("run zelda")
+            env = VecFrameStack(gvgai_env.make_gvgai_env(env_id, nenv, seed, level_selector=selector, experiment="PE", dataset="zelda"), frame_stack_size)
+            # env.reset()
+            # store = env
         else:
             frame_stack_size = 4
             env = VecFrameStack(make_atari_env(env_id, nenv, seed), frame_stack_size)
@@ -131,9 +152,15 @@ def build_env(args):
             return e
             
         env = DummyVecEnv([make_env])
+        
 
     else:
         raise ValueError('Unknown env_type {}'.format(env_type))
+    
+    # env.reset()
+    print("build env")
+    # store.reset()
+    # store.reset()
 
     return env
 
@@ -155,7 +182,7 @@ def get_env_type(env_id):
 def get_default_network(env_type):
     if env_type == 'mujoco' or env_type == 'classic_control':
         return 'mlp'
-    if env_type == 'atari':
+    if env_type == 'atari' or env_type == 'gvgai':
         return 'cnn'
 
     raise ValueError('Unknown env_type {}'.format(env_type))

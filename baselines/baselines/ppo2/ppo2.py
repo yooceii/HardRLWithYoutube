@@ -18,6 +18,9 @@ from baselines.common.mpi_util import sync_from_root
 
 USE_IMMITATION_ENV = False
 if USE_IMMITATION_ENV:
+    import sys
+    sys.path.append("/home/jupyter/Notebooks/Chang/HardRLWithYoutube")
+    print("ppo2")
     from TDCFeaturizer import TDCFeaturizer
     from train_featurizer import generate_dataset
 
@@ -102,7 +105,8 @@ class Runner(AbstractEnvRunner):
         self.gamma = gamma
 
         if USE_IMMITATION_ENV:
-            self.featurizer = TDCFeaturizer(92, 92, 84, 84, feature_vector_size=1024, learning_rate=0, experiment_name='default', is_variational=False)
+            print("ppo2 runner")
+            self.featurizer = TDCFeaturizer(92, 92, 84, 84, feature_vector_size=1024, learning_rate=0, experiment_name='default')
             self.featurizer.load()
             video_dataset = generate_dataset('default', framerate=30/15, width=84, height=84)[0]
             self.featurized_dataset = self.featurizer.featurize(video_dataset)

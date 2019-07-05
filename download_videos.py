@@ -1,5 +1,6 @@
 import os
 import argparse
+import imageio
 
 def main():
     """ Uses youtube-dl to download entire list of playlists from {filename}
@@ -12,7 +13,8 @@ def main():
     playlists_data = open(args.filename, "r")
     for playlist in playlists_data:
         playlist_url, start_video, end_video, *_ = playlist.split()
-        os.system('youtube-dl -o videos/{}/%(playlist)s/%(playlist_index)s.%(ext)s --playlist-start {} --playlist-end {} -f "bestvideo[height<=480][ext=mp4]" {}'.format(args.filename, start_video, end_video, playlist_url))
+        print('youtube-dl -o videos/{}/%(playlist)s/%(playlist_index)s.%(ext)s --playlist-start {} --playlist-end {} -f "bestvideo[height<=480][ext=mp4]" {}'.format(args.filename, start_video, end_video, playlist_url))
+        os.system('youtube-dl -o "videos/{}/%(playlist)s/%(playlist_index)s.%(ext)s" --playlist-start {} --playlist-end {} -f "bestvideo[height<=480][ext=mp4]" {}'.format(args.filename, start_video, end_video, playlist_url))
 
 if __name__ == '__main__':
     main()

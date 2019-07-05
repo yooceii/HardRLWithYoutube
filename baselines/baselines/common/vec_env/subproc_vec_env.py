@@ -3,9 +3,12 @@ from multiprocessing import Process, Pipe
 from . import VecEnv, CloudpickleWrapper
 from baselines.common.tile_images import tile_images
 import time
+import sys
+sys.path.append("/home/jupyter/Notebooks/Chang/HardRLWithYoutube")
 
 USE_IMMITATION_ENV = True
 if USE_IMMITATION_ENV:
+    print(sys.path)
     from TDCFeaturizer import TDCFeaturizer
     from train_featurizer import generate_dataset
 
@@ -62,7 +65,7 @@ class SubprocVecEnv(VecEnv):
         VecEnv.__init__(self, len(env_fns), observation_space, action_space)
 
         if USE_IMMITATION_ENV:
-            self.featurizer = TDCFeaturizer(92, 92, 84, 84, feature_vector_size=1024, learning_rate=0, experiment_name='default', is_variational=False)
+            self.featurizer = TDCFeaturizer(92, 92, 84, 84, feature_vector_size=1024, learning_rate=0, experiment_name='default')
             self.featurizer.load()
             video_dataset = generate_dataset('default', framerate=30/15, width=84, height=84)[0]
             self.featurized_dataset = self.featurizer.featurize(video_dataset)
@@ -81,6 +84,7 @@ class SubprocVecEnv(VecEnv):
         self.waiting = False
         obs, rews, dones, infos = zip(*results)
         obs, rews, dones = np.stack(obs), np.stack(rews), np.stack(dones)
+        print("obs shape: ", obs.shape)
         if USE_IMMITATION_ENV:
             state_feature_vectors = self.featurizer.featurize(obs)
             dot_products = [np.dot(state_feature_vectors[i], self.featurized_dataset[self.checkpoint_indexes[i]]) for i in range(self.nenvs)]

@@ -1,18 +1,29 @@
 import time
 import functools
 import tensorflow as tf
+import numpy as np
+from collections import deque
 
 from baselines import logger
 
 from baselines.common import set_global_seeds, explained_variance
 from baselines.common import tf_util
 from baselines.common.policies import build_policy
+from baselines.common.runners import AbstractEnvRunner
 
-
-from baselines.a2c.utils import Scheduler, find_trainable_variables
-from baselines.a2c.runner import Runner
+from baselines.ppo2.ppo2 import safemean
+from baselines.a2c.utils import Scheduler, find_trainable_variables, discount_with_dones
+# from baselines.a2c.runner import Runner
 
 from tensorflow import losses
+
+USE_IMMITATION_ENV = False
+if USE_IMMITATION_ENV:
+    import sys
+    sys.path.append("/home/jupyter/Notebooks/Chang/HardRLWithYoutube")
+    print("a2c")
+    from TDCFeaturizer import TDCFeaturizer
+    from train_featurizer import generate_dataset
 
 class Model(object):
 
@@ -77,6 +88,95 @@ class Model(object):
         self.save = functools.partial(tf_util.save_variables, sess=sess)
         self.load = functools.partial(tf_util.load_variables, sess=sess)
         tf.global_variables_initializer().run(session=sess)
+
+class Runner(AbstractEnvRunner):
+    """
+    We use this class to generate batches of experiences
+    __init__:
+    - Initialize the runner
+    run():
+    - Make a mini batch of experiences
+    """
+    def __init__(self, env, model, nsteps=5, gamma=0.99):
+        super().__init__(env=env, model=model, nsteps=nsteps)
+        self.gamma = gamma
+        self.batch_action_shape = [x if x is not None else -1 for x in model.train_model.action.shape.as_list()]
+        self.ob_dtype = model.train_model.X.dtype.as_numpy_dtype
+        if USE_IMMITATION_ENV:
+            print("a2c runner")
+            self.featurizer = TDCFeaturizer(92, 92, 84, 84, feature_vector_size=1024, learning_rate=0, experiment_name='PE')
+            self.featurizer.load("zelda")
+            video_dataset = generate_dataset('zelda', framerate=60, width=84, height=84)[0]
+            self.featurized_dataset = self.featurizer.featurize(video_dataset)
+            self.checkpoint_indexes = None#[0] * nenvs
+
+            self.rewards = 0
+            self.counter = 0
+
+    def run(self):
+        # We initialize the lists that will contain the mb of experiences
+        mb_obs, mb_rewards, mb_actions, mb_values, mb_dones = [],[],[],[],[]
+        mb_states = self.states
+        epinfos = []
+        for n in range(self.nsteps):
+            # Given observations, take action and value (V(s))
+            # We already have self.obs because Runner superclass run self.obs[:] = env.reset() on init
+            actions, values, states, _ = self.model.step(self.obs, S=self.states, M=self.dones)
+
+            # Append the experiences
+            mb_obs.append(np.copy(self.obs))
+            mb_actions.append(actions)
+            mb_values.append(values)
+            mb_dones.append(self.dones)
+
+            # Take actions in env and look the results
+            obs, rewards, dones, infos = self.env.step(actions)
+            for info in infos:
+                maybeepinfo = info.get('episode')
+                if maybeepinfo: epinfos.append(maybeepinfo)
+            self.states = states
+            self.dones = dones
+            for n, done in enumerate(dones):
+                if done:
+                    self.obs[n] = self.obs[n]*0
+            self.obs = obs
+            mb_rewards.append(rewards)
+        mb_dones.append(self.dones)
+
+        # Batch of steps to batch of rollouts
+        mb_obs = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape)
+        mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
+        mb_actions = np.asarray(mb_actions, dtype=self.model.train_model.action.dtype.name).swapaxes(1, 0)
+        mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
+        mb_dones = np.asarray(mb_dones, dtype=np.bool).swapaxes(1, 0)
+        mb_masks = mb_dones[:, :-1]
+        mb_dones = mb_dones[:, 1:]
+
+
+        if self.gamma > 0.0:
+            # Discount/bootstrap off value fn
+            last_values = self.model.value(self.obs, S=self.states, M=self.dones).tolist()
+            for n, (rewards, dones, value) in enumerate(zip(mb_rewards, mb_dones, last_values)):
+                rewards = rewards.tolist()
+                dones = dones.tolist()
+                if dones[-1] == 0:
+                    rewards = discount_with_dones(rewards+[value], dones+[0], self.gamma)[:-1]
+                else:
+                    rewards = discount_with_dones(rewards, dones, self.gamma)
+
+                mb_rewards[n] = rewards
+
+        if USE_IMMITATION_ENV:
+            nenvs = mb_obs.shape[1]
+            if self.checkpoint_indexes == None:
+                self.checkpoint_indexes = [0] * nenvs
+            # WIP
+        mb_actions = mb_actions.reshape(self.batch_action_shape)
+
+        mb_rewards = mb_rewards.flatten()
+        mb_values = mb_values.flatten()
+        mb_masks = mb_masks.flatten()
+        return mb_obs, mb_states, mb_rewards, mb_masks, mb_actions, mb_values, epinfos
 
 
 def learn(
@@ -143,24 +243,27 @@ def learn(
                         For instance, 'mlp' network architecture has arguments num_hidden and num_layers. 
 
     '''
-    
-
+    print(type(env))
+    env.reset()
 
     set_global_seeds(seed)
 
     nenvs = env.num_envs
     policy = build_policy(env, network, **network_kwargs)
-   
+    print("build policy")
     model = Model(policy=policy, env=env, nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
         max_grad_norm=max_grad_norm, lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps, lrschedule=lrschedule)
+    print("build model")
     if load_path is not None:
         model.load(load_path)
     runner = Runner(env, model, nsteps=nsteps, gamma=gamma)
+    epinfobuf = deque(maxlen=100)
 
     nbatch = nenvs*nsteps
     tstart = time.time()
     for update in range(1, total_timesteps//nbatch+1):
-        obs, states, rewards, masks, actions, values = runner.run()
+        obs, states, rewards, masks, actions, values, epinfos = runner.run()
+        epinfobuf.extend(epinfos)
         policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
         nseconds = time.time()-tstart
         fps = int((update*nbatch)/nseconds)
@@ -172,6 +275,8 @@ def learn(
             logger.record_tabular("policy_entropy", float(policy_entropy))
             logger.record_tabular("value_loss", float(value_loss))
             logger.record_tabular("explained_variance", float(ev))
+            logger.logkv('eprewmean', safemean([epinfo['r'] for epinfo in epinfobuf]))
+            logger.logkv('eplenmean', safemean([epinfo['l'] for epinfo in epinfobuf]))
             logger.dump_tabular()
     env.close()
     return model

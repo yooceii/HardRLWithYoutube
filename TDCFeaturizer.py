@@ -195,6 +195,7 @@ class TDCFeaturizer(BaseFeaturizer):
 
         for i in range(number_of_samples):
             video_index = random.randint(0, len(videos) - 1)
+            # print(videos[video_index].shape)
             interval = random.randint(0, 5)
             if interval == 0:
                 possible_frames_start = 0
@@ -214,7 +215,8 @@ class TDCFeaturizer(BaseFeaturizer):
             elif interval == 5:
                 possible_frames_start = 21
                 possible_frames_end = 200
-
+            if videos[video_index].shape[0] < possible_frames_end:
+                print("fail")
             first_frame_index = random.randint(0, videos[video_index].shape[0] - possible_frames_end - 1)
             second_frame_index = random.randint(possible_frames_start, possible_frames_end)
 

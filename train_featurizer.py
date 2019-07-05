@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import argparse
 import os
+import imageio
+from moviepy.video.io.ffmpeg_tools import ffmpeg_extract_subclip
 from VAEFeaturizer import VAEFeaturizer
 from TDCFeaturizer import TDCFeaturizer
 from ForwardModelFeaturizer import ForwardModelFeaturizer
@@ -76,10 +78,22 @@ def generate_dataset(videos_path, framerate, width, height):
     dataset = []
     video_index = 0
     for playlist in os.listdir('videos/' + videos_path):
+        print(playlist)
         for video_name in os.listdir('videos/{}/{}'.format(videos_path, playlist)):
+            # if video_name == "1.mp4" and playlist != "zelda":
+            #     print('videos/{}/{}'.format(videos_path, playlist), video_name)
+                
             dataset.append([])
             print('Video: {}'.format(video_name))
+            
             video = cv2.VideoCapture('videos/{}/{}/{}'.format(videos_path, playlist, video_name))
+            if video.get(cv2.CAP_PROP_FRAME_COUNT) < 200:
+                ffmpeg_extract_subclip('videos/{}/{}/{}'.format(videos_path, playlist, video_name), 0, 7*60, targetname='videos/{}/{}/{}'.format(videos_path, playlist, "cut_"+video_name))
+                os.remove('videos/{}/{}/{}'.format(videos_path, playlist, video_name))
+                video = cv2.VideoCapture('videos/{}/{}/{}'.format(videos_path, playlist,  "cut_"+video_name))
+            print(video.get(cv2.CAP_PROP_FRAME_COUNT))
+            print(video.get(cv2.CAP_PROP_FRAME_WIDTH))
+            print(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
             while video.isOpened():
                 success, frame = video.read()
                 if success:
@@ -87,6 +101,7 @@ def generate_dataset(videos_path, framerate, width, height):
                     dataset[video_index].append(frame)
 
                     frame_index = video.get(cv2.CAP_PROP_POS_FRAMES)
+                    # print(frame_index)
                     video_framerate = video.get(cv2.CAP_PROP_FPS)
                     video.set(cv2.CAP_PROP_POS_FRAMES, frame_index + video_framerate // framerate)
                     last_frame_index = video.get(cv2.CAP_PROP_FRAME_COUNT)
@@ -97,15 +112,16 @@ def generate_dataset(videos_path, framerate, width, height):
                     
                 else:
                     break
+            print(np.array(dataset[video_index]).shape)
             dataset[video_index] = np.reshape(dataset[video_index], (-1, width, height, 1))
+            print(dataset[video_index].shape)
             video_index += 1
     return dataset
 
 def preprocess_image(image, width, height):
     """ Changes size, makes image monochromatic """
-
     image = cv2.resize(image, (width, height))
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.shape[2] == 3 else cv2.cvtColor(image, cv2.COLOR_RGBA2GRAY)
     image = np.array(image, dtype=np.uint8)
     image = np.expand_dims(image, -1)
     return image
@@ -125,6 +141,8 @@ if __name__ == '__main__':
     args_parser.add_argument('--learning_rate', help='Learning rate for training', type=float, default=0.0001)
     args_parser.add_argument('--restore_model', help='Start training from a saved checkpoint (featyruzer_save_path)', type=bool, default=False)
     args = args_parser.parse_args()
+    print(args)
+    # train_featurizer('tdc', 'default', 6, 92, 92, 84, 84, 50000, 32, 0.0001, featurizer_save_path="montezuma", restore_model=False)
     train_featurizer(
         args.featurizer_type,
         args.videos_path,

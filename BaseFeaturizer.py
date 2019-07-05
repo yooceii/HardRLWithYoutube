@@ -1,5 +1,6 @@
 from abc import ABCMeta, abstractmethod # Required to create an abstract class
 import numpy as np
+import os
 from scipy import spatial # For nearest neighbour lookup
 import tensorflow as tf
 
@@ -41,10 +42,10 @@ class BaseFeaturizer(metaclass=ABCMeta):
         return feature_vectors
 
     def save(self, save_path='default'):
-        return self.saver.save(self.sess, './featurizers/{}/{}.ckpt'.format(save_path, save_path))
+        return self.saver.save(self.sess, os.path.join(os.getcwd(),'featurizers/{}/{}.ckpt'.format(save_path, save_path)))
 
     def load(self, load_path='default'):
-        self.saver.restore(self.sess, './featurizers/{}/{}.ckpt'.format(load_path, load_path))
+        self.saver.restore(self.sess, os.path.join(os.getcwd(),'featurizers/{}/{}.ckpt'.format(load_path, load_path)))
 
     def evaluate_cycle_consistency(self, data, sequence_length=1024):
         '''Cycle-consistency evaluation as in "Playing hard exploration games by watching YouTube"'''
